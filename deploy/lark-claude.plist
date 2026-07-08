@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.cindy.lark-claude</string>
+    <string>com.YOURNAME.lark-claude</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/cindy/projects/lark-claudecode-bridge/.venv/bin/python</string>
+        <string>/Users/YOURNAME/lark-team-bot/.venv/bin/python</string>
         <string>-u</string>
-        <string>/Users/cindy/projects/lark-claudecode-bridge/main.py</string>
+        <string>/Users/YOURNAME/lark-team-bot/main.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/cindy/projects/lark-claudecode-bridge</string>
+    <string>/Users/YOURNAME/lark-team-bot</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -35,8 +35,8 @@
     <integer>10</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/cindy/projects/lark-claudecode-bridge/stdout.log</string>
+    <string>/Users/YOURNAME/lark-team-bot/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/cindy/projects/lark-claudecode-bridge/stderr.log</string>
+    <string>/Users/YOURNAME/lark-team-bot/stderr.log</string>
 </dict>
 </plist>

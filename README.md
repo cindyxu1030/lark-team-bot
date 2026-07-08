@@ -190,11 +190,11 @@ Run as a background service that auto-starts at login and restarts on crash.
 
 ```bash
 # 1. Edit deploy/lark-claude.plist — change all hardcoded paths to yours
-#    (the file currently has /Users/cindy/projects/lark-claudecode-bridge)
+#    (the file currently has /Users/YOURNAME/lark-team-bot)
 
 # 2. Install and load
-cp deploy/lark-claude.plist ~/Library/LaunchAgents/com.cindy.lark-claude.plist
-launchctl load ~/Library/LaunchAgents/com.cindy.lark-claude.plist
+cp deploy/lark-claude.plist ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist
+launchctl load ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist
 
 # 3. Verify
 launchctl list | grep lark-claude     # process should be listed
@@ -204,8 +204,8 @@ tail -f stdout.log                     # logs in repo dir
 Operations:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.cindy.lark-claude    # restart
-launchctl unload ~/Library/LaunchAgents/com.cindy.lark-claude.plist   # stop
+launchctl kickstart -k gui/$(id -u)/com.YOURNAME.lark-claude    # restart
+launchctl unload ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist   # stop
 ```
 
 ### Lark Skills (Calendar, Mail, Docs, etc.)
@@ -381,8 +381,8 @@ python main.py
 # 1. 编辑 deploy/lark-claude.plist，改成你自己的绝对路径
 
 # 2. 安装并加载
-cp deploy/lark-claude.plist ~/Library/LaunchAgents/com.cindy.lark-claude.plist
-launchctl load ~/Library/LaunchAgents/com.cindy.lark-claude.plist
+cp deploy/lark-claude.plist ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist
+launchctl load ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist
 
 # 3. 验证
 launchctl list | grep lark-claude
@@ -392,8 +392,8 @@ tail -f stdout.log
 运维：
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.cindy.lark-claude   # 重启
-launchctl unload ~/Library/LaunchAgents/com.cindy.lark-claude.plist  # 停服务
+launchctl kickstart -k gui/$(id -u)/com.YOURNAME.lark-claude   # 重启
+launchctl unload ~/Library/LaunchAgents/com.YOURNAME.lark-claude.plist  # 停服务
 ```
 
 ### Lark Skills（日历、邮件、文档等）
