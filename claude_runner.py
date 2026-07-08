@@ -41,6 +41,7 @@ async def run_claude(
     model: Optional[str] = None,
     cwd: Optional[str] = None,
     permission_mode: Optional[str] = None,
+    allowed_tools: Optional[list[str]] = None,
     on_text_chunk: Optional[Callable[[str], None]] = None,
     on_tool_use: Optional[Callable[[str, dict], None]] = None,
     on_process_start: Optional[Callable[[asyncio.subprocess.Process], None]] = None,
@@ -59,9 +60,19 @@ async def run_claude(
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
-            "--dangerously-skip-permissions",
-            "--permission-mode", permission_mode or PERMISSION_MODE,
         ]
+        # allowed_tools 非 None = 访客模式：不跳过权限门禁，只放行白名单工具，
+        # 其余工具在 --print 模式下无法弹确认框，自动被拒。
+        if allowed_tools is None:
+            cmd += [
+                "--dangerously-skip-permissions",
+                "--permission-mode", permission_mode or PERMISSION_MODE,
+            ]
+        else:
+            cmd += [
+                "--permission-mode", "default",
+                "--allowedTools", ",".join(allowed_tools),
+            ]
         if active_session_id:
             cmd += ["--resume", active_session_id]
         if model:
@@ -176,10 +187,11 @@ async def run_claude(
     final_text, new_session_id, returncode, stderr_text = await _run_once(session_id)
     used_fresh_session_fallback = False
 
-    # Claude 的 session 与 cwd 不兼容时，CLI 有时直接 code=1 且 stderr 为空。
+    # Claude 的 session 可能因为 cwd 变化、历史清理、或会话迁移而不可恢复。
     # 这种场景自动退回新 session，避免用户必须手动 /new。
-    if session_id and returncode != 0 and not stderr_text and not final_text:
-        print("[run_claude] resume failed without stderr, retrying with fresh session", flush=True)
+    resume_missing = "No conversation found with session ID" in stderr_text
+    if session_id and returncode != 0 and not final_text and (not stderr_text or resume_missing):
+        print("[run_claude] resume failed, retrying with fresh session", flush=True)
         final_text, new_session_id, returncode, stderr_text = await _run_once(None)
         used_fresh_session_fallback = True
 

@@ -13,7 +13,18 @@ import sys
 from datetime import datetime
 from typing import Optional, Tuple
 
-from bot_config import CLAUDE_CLI, DEFAULT_CWD
+from bot_config import AGENT_HUB_ROOT, CLAUDE_CLI, DEFAULT_CWD
+from agent_hub import (
+    append_handoff,
+    append_task,
+    bind_chat,
+    build_brief,
+    ensure_hub,
+    get_chat_binding,
+    init_project,
+    list_projects,
+    sync_brief,
+)
 from session_store import SessionStore, scan_cli_sessions, generate_summary, _get_api_token, _write_custom_title
 
 PLUGINS_DIR = os.path.expanduser("~/.claude/plugins")
@@ -34,7 +45,7 @@ MODE_ALIASES = {
 }
 
 MODEL_ALIASES = {
-    "opus": "claude-opus-4-6",
+    "opus": "opus",
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
 }
@@ -53,6 +64,14 @@ HELP_TEXT = """\
 `/cd [路径]` — 切换工具执行的工作目录
 `/ls [路径]` — 查看当前工作目录下的文件/目录
 `/workspace` 或 `/ws` — 保存/切换群组工作空间
+
+**Agent Hub：**
+`/project` — 查看/创建/绑定项目
+`/brief` — 汇总当前项目共享记忆
+`/handoff [内容]` — 追加交接记录
+`/task [内容]` — 追加项目任务
+`/sync` — 生成 PROJECT_BRIEF.md
+`/discuss [问题]` — 让 Claude 和 Codex 讨论，并返回总结
 
 **查看能力：**
 `/skills` — 列出已安装的 Claude Skills
@@ -87,7 +106,8 @@ def parse_command(text: str) -> Optional[Tuple[str, str]]:
 # Bot 自身处理的命令，其余 /xxx 转发给 Claude
 BOT_COMMANDS = {
     "help", "h", "new", "clear", "resume", "model", "mode", "status", "cd", "ls",
-    "workspace", "ws", "skills", "mcp", "usage", "stop",
+    "workspace", "ws", "project", "brief", "handoff", "task", "sync",
+    "skills", "mcp", "usage", "stop",
 }
 
 
@@ -537,6 +557,128 @@ async def _handle_workspace_command(
     )
 
 
+async def _current_project_path(user_id: str, chat_id: str, store: SessionStore) -> str:
+    cur = await store.get_current_raw(user_id, chat_id)
+    cwd = os.path.expanduser(cur.get("cwd", DEFAULT_CWD))
+    required = ("PROJECT_CONTEXT.md", "TASKS.md", "DECISIONS.md", "HANDOFF.md")
+    if os.path.isdir(cwd) and any(os.path.exists(os.path.join(cwd, name)) for name in required):
+        return cwd
+    return ""
+
+
+async def _format_project_status(user_id: str, chat_id: str, store: SessionStore) -> str:
+    ensure_hub()
+    cur = await store.get_current_raw(user_id, chat_id)
+    binding = get_chat_binding(chat_id)
+    projects = list_projects()
+    lines = ["🧭 **Agent Hub 项目**"]
+    lines.append(f"当前工作目录：`{cur.get('cwd', DEFAULT_CWD)}`")
+    if binding:
+        lines.append(f"Lark 群绑定：`{binding.get('project')}` → `{binding.get('path')}`")
+    else:
+        lines.append("Lark 群绑定：（未绑定）")
+    if projects:
+        lines.append("")
+        lines.append("已发现项目：")
+        for name, path in projects[:30]:
+            lines.append(f"• `{name}` → `{path}`")
+    else:
+        lines.append("")
+        lines.append("还没有项目记忆文件。")
+    lines.append("")
+    lines.append("用法：")
+    lines.append("`/project new 名称` 创建项目并绑定当前聊天")
+    lines.append("`/project use 名称或路径` 绑定当前聊天到项目")
+    lines.append("`/brief` 查看共享记忆摘要")
+    lines.append("`/handoff 内容` 追加交接")
+    lines.append("`/task 内容` 追加任务")
+    lines.append("`/sync` 生成 PROJECT_BRIEF.md")
+    return "\n".join(lines)
+
+
+async def _handle_project_command(args: str, user_id: str, chat_id: str, store: SessionStore) -> str:
+    ensure_hub()
+    if not args:
+        return await _format_project_status(user_id, chat_id, store)
+    try:
+        parts = shlex.split(args)
+    except ValueError as e:
+        return f"❌ 参数解析失败：{e}"
+    if not parts:
+        return await _format_project_status(user_id, chat_id, store)
+    action = parts[0].lower()
+    if action in {"list", "ls", "status"}:
+        return await _format_project_status(user_id, chat_id, store)
+    if action in {"new", "create", "use", "init"}:
+        if len(parts) < 2:
+            return "⚠️ 用法：`/project new 名称` 或 `/project use 名称或路径`"
+        raw_name = parts[1]
+        display_name = raw_name if not os.path.isabs(os.path.expanduser(raw_name)) else os.path.basename(raw_name.rstrip("/"))
+        path = init_project(raw_name, display_name=display_name)
+        workspace_name = path.name
+        await store.save_workspace(user_id, workspace_name, str(path))
+        await store.bind_workspace(user_id, chat_id, workspace_name)
+        bind_chat(chat_id, workspace_name, str(path))
+        return (
+            f"✅ 当前聊天已绑定到项目 `{workspace_name}`\n"
+            f"项目目录：`{path}`\n"
+            "已创建/确认共享记忆文件：`AGENTS.md`、`CLAUDE.md`、`PROJECT_CONTEXT.md`、`TASKS.md`、`DECISIONS.md`、`HANDOFF.md`\n"
+            "建议下一步：发送 `/brief` 检查项目记忆，或直接让 Codex/Claude 开始工作。"
+        )
+    return f"❌ 未知子命令：`{action}`\n可用：`list`、`new`、`use`、`init`"
+
+
+async def _handle_brief_command(user_id: str, chat_id: str, store: SessionStore) -> str:
+    path = await _current_project_path(user_id, chat_id, store)
+    if not path:
+        return "❌ 当前聊天还没有绑定 Agent Hub 项目。先用 `/project use 项目名`。"
+    return build_brief(path)
+
+
+async def _handle_handoff_command(args: str, user_id: str, chat_id: str, store: SessionStore) -> str:
+    path = await _current_project_path(user_id, chat_id, store)
+    if not path:
+        return "❌ 当前聊天还没有绑定 Agent Hub 项目。先用 `/project use 项目名`。"
+    if not args.strip():
+        handoff_path = os.path.join(path, "HANDOFF.md")
+        try:
+            with open(handoff_path, encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError as e:
+            return f"❌ 读取 HANDOFF.md 失败：{e}"
+        return text[-3500:] if text else "HANDOFF.md 为空。"
+    append_handoff(path, args, actor="Lark")
+    return f"✅ 已追加交接记录到 `{os.path.join(path, 'HANDOFF.md')}`"
+
+
+async def _handle_task_command(args: str, user_id: str, chat_id: str, store: SessionStore) -> str:
+    path = await _current_project_path(user_id, chat_id, store)
+    if not path:
+        return "❌ 当前聊天还没有绑定 Agent Hub 项目。先用 `/project use 项目名`。"
+    if not args.strip():
+        tasks_path = os.path.join(path, "TASKS.md")
+        try:
+            with open(tasks_path, encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError as e:
+            return f"❌ 读取 TASKS.md 失败：{e}"
+        return text[-3500:] if text else "TASKS.md 为空。"
+    append_task(path, args)
+    return f"✅ 已追加任务到 `{os.path.join(path, 'TASKS.md')}`"
+
+
+async def _handle_sync_command(user_id: str, chat_id: str, store: SessionStore) -> str:
+    path = await _current_project_path(user_id, chat_id, store)
+    if not path:
+        return "❌ 当前聊天还没有绑定 Agent Hub 项目。先用 `/project use 项目名`。"
+    brief_path = sync_brief(path)
+    return (
+        "✅ 已同步项目摘要\n"
+        f"项目摘要：`{brief_path}`\n"
+        f"Hub 副本：`{os.path.join(AGENT_HUB_ROOT, 'latest-briefs', os.path.basename(path) + '.md')}`"
+    )
+
+
 async def handle_command(
     cmd: str,
     args: str,
@@ -664,6 +806,21 @@ async def handle_command(
 
     elif cmd == "workspace":
         return await _handle_workspace_command(args, user_id, chat_id, store)
+
+    elif cmd == "project":
+        return await _handle_project_command(args, user_id, chat_id, store)
+
+    elif cmd == "brief":
+        return await _handle_brief_command(user_id, chat_id, store)
+
+    elif cmd == "handoff":
+        return await _handle_handoff_command(args, user_id, chat_id, store)
+
+    elif cmd == "task":
+        return await _handle_task_command(args, user_id, chat_id, store)
+
+    elif cmd == "sync":
+        return await _handle_sync_command(user_id, chat_id, store)
 
     elif cmd == "skills":
         return _list_skills()
